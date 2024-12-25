@@ -1,5 +1,5 @@
 """
-5/24/2024
+12/25/2024
 
 QM/MM space builder helper
 Script to print out indices of atoms to use in constructing QM/MM space
@@ -13,12 +13,17 @@ Input:
 Construct PDB file from Amber prmtop and inpcrd file
 Find residues within given radius from given atom indices
 Build QM/MM space from the residues found
+
+Rewrite to better handle multichain structures and updated biotite 1.0.1 syntax
+
+
 """
 
 import biotite
 import numpy as np
 from biotite.structure.io.pdb import PDBFile
-from biotite.structure import AtomArray, Atom, distance, array
+from biotite.structure import AtomArray, Atom, distance, array, infer_elements, get_residue_positions
+
 
 #==============================================================================
 # Input and Global Variables
@@ -26,39 +31,95 @@ from biotite.structure import AtomArray, Atom, distance, array
 
 #INPCRD = r"/scratch/09069/dhp563/ash/test/amber/prmtop_inpcrd/prmtop_inpcrd_relaxed/6YD0_solv_tip3.inpcrd"
 #PRMTOP = r"/scratch/09069/dhp563/ash/test/amber/prmtop_inpcrd/prmtop_inpcrd_relaxed/noflag.prmtop"
-PDB= r"/scratch/09069/dhp563/ash/test/amber/prmtop_inpcrd/prmtop_inpcrd_relaxed/6YD0_solv_tip3.pdb"
-ATOM_INDICES = [8155, 8154]  #iron indices from 6YD0
-SPECIAL_RESIDUE = ['HH1', 'HH2', 'HH3']
-DISTANCE = 4.0
+
+#chain index file
+#temp fix for dependency in get_chains only working properly when everything is sorted nicely chain-wise
+#command to generate file:
+# sed -i '/TER/d' $PDB
+# cut -c21,22 $PDB > chain_index.txt
+# sed -i '/^\s*$/d' chain_index.txt
+CHAIN_INDEX_FILE = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/chain_index.txt"
+
+#PDB file to use
+PDB= r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/last_snapshot_3DHI_NVT_imaged.pdb"
+
+#atom at the center of the active site, around which to search for residues
+ATOM_INDICES = [15830, 15831]  #iron indices from 3DHI
+
+#residues that bypass the implemented selection rule
+SPECIAL_RESIDUE = []
+
+#search for however many angstroms around the specified atom indices
+DISTANCE = 6.0
+
+#output index file, to use in ASH QMMM indexing
+INDEX_FILE_NAME = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/3DHI_active_site_indices.txt"
 
 #==============================================================================
 # Functions
 #==============================================================================
 
+def read_chain_index(file: str) -> list:
+    """
+    Read chain index file and return a list of chain indices
+    """
+    with open(file, 'r') as f:
+        chain_index = f.readlines()
+    #remove all empty lines
+    chain_index = [line.strip() for line in chain_index if line.strip()]
+    return chain_index
+
 def get_pdb(pdb: str) -> AtomArray:
     """
     Read pdb file and return AtomArray
+    Add a few annotations
+        element: guess element type from atom name
+        atom_index: counting from 0, assign each atom an index based on their ordering in the pdb file
     """
-    pdb_file = PDBFile.read(pdb).get_structure()[0]
-    return pdb_file
+    pdb_structure = PDBFile.read(pdb).get_structure()[0]
+    pdb_structure.set_annotation('element', infer_elements(pdb_structure))
+    #create atom indices annotation
+    pdb_structure.set_annotation('atom_index', np.arange(0, len(pdb_structure)))
+    pdb_structure.set_annotation('chain', read_chain_index(CHAIN_INDEX_FILE))
+    pdb_structure.set_annotation('res_index', get_residue_positions(pdb_structure, pdb_structure.atom_index))
+    return pdb_structure
 
-def get_residue_index_within_distance(pdb: AtomArray, spec_atom_array: AtomArray, search_radius: float) -> list:
+def get_residue_index_within_distance(pdb: AtomArray, spec_atom_array: AtomArray, search_radius: float) -> dict:
     """
     Iterate over pdb and get residues indices within given distance of speficied atom
+    Return a dictionary of chain: residue index
     """
     nearby_atoms = []
     for spec_atom in spec_atom_array: 
         imm_nearby_atoms = [atom for atom in pdb if distance(atom, spec_atom) <= search_radius]
         nearby_atoms.extend(imm_nearby_atoms)
-    
-    #return non-duplicate residue indices
-    return list(set([atom.res_id for atom in nearby_atoms]))
+    chain_res_dict = {}
 
-def get_atoms_from_residue_index(pdb: AtomArray, residue_index: list) -> AtomArray:
+    for atom in nearby_atoms:
+        current_chain = atom.chain
+        try:
+            chain_res_dict[current_chain].append(atom.res_index)
+        except KeyError:
+            chain_res_dict[current_chain] = [atom.res_index] 
+
+    for chain in chain_res_dict:
+        chain_res_dict[chain] = list(set(chain_res_dict[chain]))
+
+    return chain_res_dict
+
+
+def get_atoms_from_chain_residue_index(pdb: AtomArray, residue_index: dict) -> AtomArray:
     """
-    Read PDB file and return an AtomArray of atoms from the specified residue indices
+    Read PDB file and return an AtomArray of atoms from the chain and specified residue indices
+    
+    pdb: the atom array to search over
+    residue_index: a dictionary of chain: indices
     """
-    return array([atom for atom in pdb if atom.res_id in residue_index])
+    atoms_in_index = []
+    for chain in residue_index:
+        for res_index in residue_index[chain]:
+            atoms_in_index.extend([atom for atom in pdb if atom.res_index == res_index and atom.chain == chain])
+    return array(atoms_in_index)
 
 def trim_atom_array(residues: AtomArray, rules: str = 'Ca-Cb', keep_glycine = False, keep_box_water = False) -> AtomArray:
     """
@@ -85,7 +146,7 @@ def print_atom_indices_by_element(atom_array: AtomArray) -> list:
     Print atom indices of specified element
     """
     #get all elements in array
-    elements = set([atom.elements for atom in atom_array])
+    elements = set([atom.element for atom in atom_array])
     
     element_dict_indices = {}
 
@@ -95,36 +156,46 @@ def print_atom_indices_by_element(atom_array: AtomArray) -> list:
         print(element_dict_indices[element])
 
     return element_dict_indices
-        
+
+def write_atom_indices_to_file(atom_indices_dict: dict, file: str):
+    """
+    Write atom indices to file
+    """
+    with open(file, 'w') as f:
+        for element in atom_indices_dict:
+            for atom_index in atom_indices_dict[element]:
+                f.write(f"{atom_index}")
+                f.write('\n')
 
 #==============================================================================
 # Main
 #==============================================================================
 
-if __name__ == '__main__':
+def run_qm_space_builder():
     print('Reading pdb file... \n') 
     pdb = get_pdb(PDB)
 
-    
-    #create atom indices annotation
-    pdb.set_annotation('atom_index', np.arange(0, len(pdb)))
 
     #check special residue
-    special_residue = array([atom for atom in pdb if atom.res_name in SPECIAL_RESIDUE])
-    print("Special residue: \n")
-    print(special_residue)
+    if len (SPECIAL_RESIDUE) > 0:
+        special_residue = array([atom for atom in pdb if atom.res_name in SPECIAL_RESIDUE])
+        print("Special residue: \n")
+        print(special_residue)
+    else:
+        special_residue = None
 
     #get atoms from specified indices
     spec_atoms = pdb[ATOM_INDICES]
     print("Atom from specified indices: \n")
     print(spec_atoms)
+    print(spec_atoms.res_id)
 
     print(f"Getting residues within {DISTANCE} of specified atom indices... \n")
     #get residues within given distance of specified atom indices
     residue_index = get_residue_index_within_distance(pdb, spec_atoms, DISTANCE)
 
     #get active site atoms
-    active_site_atoms = get_atoms_from_residue_index(pdb, residue_index)
+    active_site_atoms = get_atoms_from_chain_residue_index(pdb, residue_index)
 
     #trim atom to create qm space
     trimmed_array = trim_atom_array(active_site_atoms, 
@@ -135,12 +206,19 @@ if __name__ == '__main__':
     print(trimmed_array)
 
     #get complete active site by combining special residue and trimmed array
-    complete_active_site = special_residue + trimmed_array
+    if special_residue:
+        complete_active_site = trimmed_array + special_residue
+    else:
+        complete_active_site = trimmed_array
 
-    print(f"Complete active site: \n")
+    print(f"Complete active site: /n")
     print(complete_active_site)  
 
-    print("Atom indices to use for QM space: \n")
-    print(list(complete_active_site.get_annotation('atom_index')))    
+    #write atom indices to text file
+    element_dict = print_atom_indices_by_element(complete_active_site)
 
-    print_atom_indices_by_element(complete_active_site)
+    write_atom_indices_to_file(element_dict, INDEX_FILE_NAME)
+
+if __name__ == '__main__':
+    run_qm_space_builder()
+

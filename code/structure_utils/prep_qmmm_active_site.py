@@ -25,6 +25,7 @@ from biotite.structure.io.pdb import PDBFile
 from biotite.structure import AtomArray, Atom, distance, array, infer_elements, get_residue_positions
 
 
+
 #==============================================================================
 # Input and Global Variables
 #==============================================================================
@@ -53,7 +54,10 @@ SPECIAL_RESIDUE = []
 DISTANCE = 6.0
 
 #output index file, to use in ASH QMMM indexing
-INDEX_FILE_NAME = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/3DHI_active_site_indices.txt"
+INDEX_FILE_NAME = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/3DHI_active_site_indices"
+
+#selection rule for indexing special atoms with extra basis set
+EXTRA_BASIS_SELECTION = 'N_O_4'
 
 #==============================================================================
 # Functions
@@ -84,15 +88,20 @@ def get_pdb(pdb: str) -> AtomArray:
     pdb_structure.set_annotation('res_index', get_residue_positions(pdb_structure, pdb_structure.atom_index))
     return pdb_structure
 
-def get_residue_index_within_distance(pdb: AtomArray, spec_atom_array: AtomArray, search_radius: float) -> dict:
+def get_residue_index_within_distance(pdb: AtomArray, 
+                                           spec_atom_array: AtomArray, 
+                                           search_radius: float) -> dict:
     """
     Iterate over pdb and get residues indices within given distance of speficied atom
-    Return a dictionary of chain: residue index
+    Return two things:
+    A dictionary of chain: residue index
+    A list of atoms to use for extrabasis, which are coordinating nitrogen or oxygen 
     """
     nearby_atoms = []
     for spec_atom in spec_atom_array: 
         imm_nearby_atoms = [atom for atom in pdb if distance(atom, spec_atom) <= search_radius]
         nearby_atoms.extend(imm_nearby_atoms)
+    
     chain_res_dict = {}
 
     for atom in nearby_atoms:
@@ -106,6 +115,26 @@ def get_residue_index_within_distance(pdb: AtomArray, spec_atom_array: AtomArray
         chain_res_dict[chain] = list(set(chain_res_dict[chain]))
 
     return chain_res_dict
+
+def get_extra_basis_atoms(qmatoms: AtomArray, spec_atoms:AtomArray ,selection: str) -> AtomArray:
+    """
+    Get atoms to use for extra basis set
+    """
+    #infer element and distance from selection string
+    search_radius = selection.split('_')[-1]
+    element = selection.split('_')[:-1]
+    
+    print("Searching for atoms with element: ", element, " and distance: ", search_radius)  
+
+    extra_basis_atoms = []
+    for spec_atom in spec_atoms:
+        for atom in qmatoms:
+            if atom.element in element:
+                if distance(atom, spec_atom) <= float(search_radius):
+                    if atom not in extra_basis_atoms:
+                        extra_basis_atoms.append(atom)
+    return array(extra_basis_atoms)
+
 
 
 def get_atoms_from_chain_residue_index(pdb: AtomArray, residue_index: dict) -> AtomArray:
@@ -127,6 +156,7 @@ def trim_atom_array(residues: AtomArray, rules: str = 'Ca-Cb', keep_glycine = Fa
     
     C-Ca: remove all backbone atoms (C, O, N) to create a QM space selection with carbon-carbon boundary
     this doesn't work with glycine
+    keep_box_water argument assumes bulk water has different naming than active site water
     """
     if not keep_box_water:
         residues = array([atom for atom in residues if atom.res_name not in ['WAT', 'HOH']])
@@ -211,14 +241,18 @@ def run_qm_space_builder():
     else:
         complete_active_site = trimmed_array
 
+    #get extrabasis atoms
+    extrabasis_atoms = get_extra_basis_atoms(complete_active_site, spec_atoms, EXTRA_BASIS_SELECTION)
+
     print(f"Complete active site: /n")
     print(complete_active_site)  
 
     #write atom indices to text file
     element_dict = print_atom_indices_by_element(complete_active_site)
-
-    write_atom_indices_to_file(element_dict, INDEX_FILE_NAME)
+    extrabasis_element_dict = print_atom_indices_by_element(extrabasis_atoms)
+    
+    write_atom_indices_to_file(element_dict, INDEX_FILE_NAME + '.txt')
+    write_atom_indices_to_file(extrabasis_element_dict, INDEX_FILE_NAME + '_extrabasis.txt')
 
 if __name__ == '__main__':
     run_qm_space_builder()
-

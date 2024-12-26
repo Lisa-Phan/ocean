@@ -128,6 +128,7 @@ def get_extra_basis_atoms(qmatoms: AtomArray, spec_atoms:AtomArray ,selection: s
 
     extra_basis_atoms = []
     for spec_atom in spec_atoms:
+        extra_basis_atoms.append(spec_atom)
         for atom in qmatoms:
             if atom.element in element:
                 if distance(atom, spec_atom) <= float(search_radius):

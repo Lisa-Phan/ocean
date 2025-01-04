@@ -1,5 +1,5 @@
 """
-12/25/2024
+1/3/2025
 
 QM/MM space builder helper
 Script to print out indices of atoms to use in constructing QM/MM space
@@ -24,8 +24,6 @@ import numpy as np
 from biotite.structure.io.pdb import PDBFile
 from biotite.structure import AtomArray, Atom, distance, array, infer_elements, get_residue_positions
 
-
-
 #==============================================================================
 # Input and Global Variables
 #==============================================================================
@@ -48,16 +46,17 @@ PDB= r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/last_snapshot
 ATOM_INDICES = [15830, 15831]  #iron indices from 3DHI
 
 #residues that bypass the implemented selection rule
-SPECIAL_RESIDUE = []
+SPECIAL_RESIDUE = ['HOH_2_F']
 
 #search for however many angstroms around the specified atom indices
-DISTANCE = 6.0
+DISTANCE = 3.0
 
 #output index file, to use in ASH QMMM indexing
-INDEX_FILE_NAME = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/3DHI_active_site_indices"
+INDEX_FILE_NAME = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/3DHI_active_site_indices_small_3ang"
 
-#selection rule for indexing special atoms with extra basis set
-EXTRA_BASIS_SELECTION = 'N_O_4'
+#selection rule for indexing special atoms with extra basis set, including 
+# elements specified by letters and last character as number for distance
+EXTRA_BASIS_SELECTION = 'N_O_3'
 
 #==============================================================================
 # Functions
@@ -136,7 +135,18 @@ def get_extra_basis_atoms(qmatoms: AtomArray, spec_atoms:AtomArray ,selection: s
                         extra_basis_atoms.append(atom)
     return array(extra_basis_atoms)
 
+def get_special_residue(pdb: AtomArray, special_residue: list) -> AtomArray:
+    """
+    Get atoms from special residue
+    """
+    selected = []
+    for residue in special_residue:
+        #iterate over structure, each time adding atoms from the residue to the selected array
+        res_name, res_num, chain = residue.split('_')
+        special_residue = [atom for atom in pdb if atom.res_name == res_name and atom.res_id == int(res_num) and atom.chain == chain]    
+        selected += special_residue
 
+    return array(selected)
 
 def get_atoms_from_chain_residue_index(pdb: AtomArray, residue_index: dict) -> AtomArray:
     """
@@ -209,7 +219,7 @@ def run_qm_space_builder():
 
     #check special residue
     if len (SPECIAL_RESIDUE) > 0:
-        special_residue = array([atom for atom in pdb if atom.res_name in SPECIAL_RESIDUE])
+        special_residue = get_special_residue(pdb, SPECIAL_RESIDUE)
         print("Special residue: \n")
         print(special_residue)
     else:
@@ -217,11 +227,11 @@ def run_qm_space_builder():
 
     #get atoms from specified indices
     spec_atoms = pdb[ATOM_INDICES]
-    print("Atom from specified indices: \n")
+    print("Atom from specified indices: ")
     print(spec_atoms)
     print(spec_atoms.res_id)
 
-    print(f"Getting residues within {DISTANCE} of specified atom indices... \n")
+    print(f"Getting residues within {DISTANCE} of specified atom indices... ")
     #get residues within given distance of specified atom indices
     residue_index = get_residue_index_within_distance(pdb, spec_atoms, DISTANCE)
 
@@ -237,7 +247,7 @@ def run_qm_space_builder():
     print(trimmed_array)
 
     #get complete active site by combining special residue and trimmed array
-    if special_residue:
+    if len(special_residue) > 0:
         complete_active_site = trimmed_array + special_residue
     else:
         complete_active_site = trimmed_array
@@ -249,7 +259,10 @@ def run_qm_space_builder():
     print(complete_active_site)  
 
     #write atom indices to text file
+    # print("Printing QM atom indices")
     element_dict = print_atom_indices_by_element(complete_active_site)
+    
+    # print("Printing extrabasis atom indices")
     extrabasis_element_dict = print_atom_indices_by_element(extrabasis_atoms)
     
     write_atom_indices_to_file(element_dict, INDEX_FILE_NAME + '.txt')

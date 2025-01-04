@@ -46,7 +46,10 @@ PDB= r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/last_snapshot
 ATOM_INDICES = [15830, 15831]  #iron indices from 3DHI
 
 #residues that bypass the implemented selection rule
-SPECIAL_RESIDUE = ['HOH_2_F']
+SPECIAL_RESIDUE = ['GLN_227_A', 'ASP_132_A', 'ASP_229_A', 'THR_200_A']
+
+#catalytically relevant water, bypass selection rule
+SPECIAL_WATER = ['HOH_2_F']
 
 #search for however many angstroms around the specified atom indices
 DISTANCE = 3.0
@@ -143,7 +146,12 @@ def get_special_residue(pdb: AtomArray, special_residue: list) -> AtomArray:
     for residue in special_residue:
         #iterate over structure, each time adding atoms from the residue to the selected array
         res_name, res_num, chain = residue.split('_')
-        special_residue = [atom for atom in pdb if atom.res_name == res_name and atom.res_id == int(res_num) and atom.chain == chain]    
+        special_residue = [atom for atom in pdb if 
+                           atom.res_name == res_name and 
+                           atom.res_id == int(res_num) and 
+                           atom.chain == chain]
+        if len(special_residue) == 0:
+            raise ValueError(f"Special residue {residue} not found in pdb")    
         selected += special_residue
 
     return array(selected)
@@ -238,29 +246,33 @@ def run_qm_space_builder():
     #get active site atoms
     active_site_atoms = get_atoms_from_chain_residue_index(pdb, residue_index)
 
+    #get complete active site by combining special residue and active site atoms
+    if len(special_residue) > 0:
+        active_site_atoms = active_site_atoms + special_residue
+
     #trim atom to create qm space
     trimmed_array = trim_atom_array(active_site_atoms, 
                                     rules = 'Ca-Cb', 
                                     keep_glycine = False)
 
-    print(f"Active site atoms: /n ")
+    #add water to the trimmed array and active site atoms
+    if len(SPECIAL_WATER) > 0:
+        special_water = get_special_residue(pdb, SPECIAL_WATER)
+        trimmed_array = trimmed_array + special_water
+        active_site_atoms = active_site_atoms + special_water
+
+    print(f"Active site atoms, applied trimming rule:")
     print(trimmed_array)
 
-    #get complete active site by combining special residue and trimmed array
-    if len(special_residue) > 0:
-        complete_active_site = trimmed_array + special_residue
-    else:
-        complete_active_site = trimmed_array
-
     #get extrabasis atoms
-    extrabasis_atoms = get_extra_basis_atoms(complete_active_site, spec_atoms, EXTRA_BASIS_SELECTION)
+    extrabasis_atoms = get_extra_basis_atoms(active_site_atoms, spec_atoms, EXTRA_BASIS_SELECTION)
 
-    print(f"Complete active site: /n")
-    print(complete_active_site)  
+    print(f"Complete active site, include all parts of residue:")
+    print(active_site_atoms)  
 
     #write atom indices to text file
     # print("Printing QM atom indices")
-    element_dict = print_atom_indices_by_element(complete_active_site)
+    element_dict = print_atom_indices_by_element(trimmed_array)
     
     # print("Printing extrabasis atom indices")
     extrabasis_element_dict = print_atom_indices_by_element(extrabasis_atoms)

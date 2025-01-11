@@ -265,7 +265,7 @@ def trim_atom_array(residues: AtomArray, rules: str = 'Ca-Cb', keep_glycine = Fa
     else:
         raise ValueError('Invalid rule')
     
-def print_atom_indices_by_element(atom_array: AtomArray) -> list:
+def print_atom_indices_by_element(atom_array: AtomArray) -> dict:
     """
     Print atom indices of specified element
     """
@@ -359,6 +359,8 @@ def run_qm_space_builder_linker():
     pdb = get_pdb(PDB)
     long_trim = trim_atom_linker_rule(pdb, LINKER_RESIDUE)
     print(long_trim)
+    element_dict = print_atom_indices_by_element(long_trim)
+    write_atom_indices_to_file(element_dict, INDEX_FILE_NAME + '.txt')
 
 
 if __name__ == '__main__':

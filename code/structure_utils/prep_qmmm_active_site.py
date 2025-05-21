@@ -59,6 +59,8 @@ INDEX_FILE_NAME = r"3DHI_hydroxobridge_active_site_indices_small_3ang"
 # elements specified by letters and last character as number for distance
 EXTRA_BASIS_SELECTION = 'N_O_3'
 
+#things to add onto extra basis selection just in case you need it
+MORE_EXTRA_BASIS_INDICES = []
 
 #==============================================================================
 # Functions
@@ -206,11 +208,14 @@ def print_atom_indices_by_element(atom_array: AtomArray) -> list:
     return element_dict_indices
 
 
-def write_atom_indices_to_file(atom_indices_dict: dict, file: str):
+def write_atom_indices_to_file(atom_indices_dict: dict, file: str, additional_indices: list = None):
     """
     Sort atom indices in dictionary before writing
+    additional indices: any other indexes to add nonwithstanding selection rule
     """
     combined_indices = []
+    if additional_indices:
+        combined_indices.extend(additional_indices)
     combined_indices.extend(index for element in atom_indices_dict for index in atom_indices_dict[element])
     combined_indices = list(set(combined_indices))
     combined_indices.sort()

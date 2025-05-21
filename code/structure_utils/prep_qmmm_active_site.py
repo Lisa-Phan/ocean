@@ -1,5 +1,5 @@
 """
-1/3/2025
+21/5/2025
 
 QM/MM space builder helper
 Script to print out indices of atoms to use in constructing QM/MM space
@@ -10,13 +10,11 @@ Input:
     - search radius
     - rules trim option (current options: -c (c-calpha))
     
-Construct PDB file from Amber prmtop and inpcrd file
+Construct PDB file from Amber prmtop and inpcrd file or just pdb file
 Find residues within given radius from given atom indices
 Build QM/MM space from the residues found
 
 Rewrite to better handle multichain structures and updated biotite 1.0.1 syntax
-
-
 """
 
 import biotite
@@ -37,29 +35,30 @@ from biotite.structure import AtomArray, Atom, distance, array, infer_elements, 
 # sed -i '/TER/d' $PDB
 # cut -c21,22 $PDB > chain_index.txt
 # sed -i '/^\s*$/d' chain_index.txt
-CHAIN_INDEX_FILE = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/chain_index.txt"
+CHAIN_INDEX_FILE = r"chain_index.txt"
 
 #PDB file to use
-PDB= r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/last_snapshot_3DHI_NVT_imaged.pdb"
+PDB= r"3DHI_hydroxobridge.pdb"
 
 #atom at the center of the active site, around which to search for residues
-ATOM_INDICES = [15830, 15831]  #iron indices from 3DHI
+ATOM_INDICES = [204464, 204465]  #iron indices from 3DHI
 
 #residues that bypass the implemented selection rule
 SPECIAL_RESIDUE = ['GLN_227_A', 'ASP_132_A', 'ASP_229_A', 'THR_200_A']
 
-#catalytically relevant water, bypass selection rule
-SPECIAL_WATER = ['HOH_2_F']
+#catalytically relevant water or small molecule, bypass selection rule
+SPECIAL_WATER = ['HOH_4_E', 'DO2_3_E', 'OH_5_E']
 
 #search for however many angstroms around the specified atom indices
 DISTANCE = 3.0
 
 #output index file, to use in ASH QMMM indexing
-INDEX_FILE_NAME = r"/stor/scratch/YiLu/dhp563/ash/sandbox/qmmm_fullcomplex_3DHI/3DHI_active_site_indices_small_3ang"
+INDEX_FILE_NAME = r"3DHI_hydroxobridge_active_site_indices_small_3ang"
 
 #selection rule for indexing special atoms with extra basis set, including 
 # elements specified by letters and last character as number for distance
 EXTRA_BASIS_SELECTION = 'N_O_3'
+
 
 #==============================================================================
 # Functions
@@ -206,15 +205,19 @@ def print_atom_indices_by_element(atom_array: AtomArray) -> list:
 
     return element_dict_indices
 
+
 def write_atom_indices_to_file(atom_indices_dict: dict, file: str):
     """
-    Write atom indices to file
+    Sort atom indices in dictionary before writing
     """
+    combined_indices = []
+    combined_indices.extend(index for element in atom_indices_dict for index in atom_indices_dict[element])
+    combined_indices = list(set(combined_indices))
+    combined_indices.sort()
     with open(file, 'w') as f:
-        for element in atom_indices_dict:
-            for atom_index in atom_indices_dict[element]:
-                f.write(f"{atom_index}")
-                f.write('\n')
+        for atom_index in combined_indices:
+            f.write(f"{atom_index}")
+            f.write('\n')
 
 #==============================================================================
 # Main
@@ -249,7 +252,6 @@ def run_qm_space_builder():
     #get complete active site by combining special residue and active site atoms
     if len(special_residue) > 0:
         active_site_atoms = active_site_atoms + special_residue
-
     #trim atom to create qm space
     trimmed_array = trim_atom_array(active_site_atoms, 
                                     rules = 'Ca-Cb', 
@@ -272,8 +274,7 @@ def run_qm_space_builder():
 
     #write atom indices to text file
     # print("Printing QM atom indices")
-    element_dict = print_atom_indices_by_element(trimmed_array)
-    
+    element_dict = print_atom_indices_by_element(trimmed_array)    
     # print("Printing extrabasis atom indices")
     extrabasis_element_dict = print_atom_indices_by_element(extrabasis_atoms)
     
